@@ -3,8 +3,8 @@ from torch.utils.data import Dataset
 from dataset import VGDataset, collate
 from models import VGG16, DQN, DQN_MLP
 from operator import itemgetter
-from faster_rcnn import network
-from faster_rcnn.faster_rcnn import FasterRCNN
+#from faster_rcnn import network
+#from faster_rcnn.faster_rcnn import FasterRCNN
 from image_state import ImageState
 from replay_buffer import ReplayMemory
 from utils.vg_utils import entity_to_aliases, predicate_to_aliases, find_object_neighbors, crop_box
@@ -12,6 +12,7 @@ from PIL import Image
 from skip_thoughts import skipthoughts
 from collections import defaultdict
 
+import time
 import torch
 import torch.nn as nn
 import argparse
@@ -26,7 +27,7 @@ def train(parameters, train=True):
 	# make model CUDA
 	if torch.cuda.is_available():
 		model_VGG = model_vgg.cuda()
-		model_FRCNN = model_frcnn.cuda()
+		#model_FRCNN = model_frcnn.cuda()
 		model_next_object_main = DQN_next_object_main.cuda()
 		model_next_object_target = DQN_next_object_target.cuda()	
 		model_attribute_main = DQN_attribute_main.cuda()
@@ -86,6 +87,7 @@ def train(parameters, train=True):
 						continue
 
 					entity_features = []
+					t1 = time.time()
 					for box in entity_proposals:
 						cropped_entity = crop_box(images_orig[idx], box)
 						cropped_entity = torch.autograd.Variable(cropped_entity)
@@ -93,6 +95,9 @@ def train(parameters, train=True):
 							cropped_entity = cropped_entity.cuda()
 						box_feature = model_VGG(cropped_entity)
 						entity_features.append(box_feature)
+					t2 = time.time()
+					print len(entity_features)
+					print 'time=', t2-t1
 					im_state = ImageState(gt_sg["image_name"], gt_sg, image_feature, entity_features,
 											entity_proposals, entity_classes, entity_scores, semantic_action_graph)
 					im_state.initialize_entities(entity_proposals, entity_classes, entity_scores)
@@ -101,8 +106,9 @@ def train(parameters, train=True):
 					# reset image state from last epoch
 					image_states[image_name].reset()
 				im_state = image_states[image_name]	
+				print time.time()
 				while not im_state.is_done():
-					
+					#print time.time()
 					#print("Iter for image " + str(image_name))
 
 					# get the image state object for image
@@ -346,7 +352,7 @@ if __name__=='__main__':
 				default="data/data_samples/test_data.json",
 				help='Location of the file containing test data samples')
 	parser.add_argument("--images_dir", type=str,
-				default="data/VG_100K/",
+				default="data/images/VG_100K/",
 				help="Location of Visual Genome images")
 	parser.add_argument("--train", help="trains model", action="store_true")
 	parser.add_argument("--test", help="evaluates model", action="store_true")
@@ -406,13 +412,13 @@ if __name__=='__main__':
 	print("Done!")
 
 	# create Faster-RCNN model for state featurization
-	print("Loading Fast-RCNN...")
+	'''print("Loading Fast-RCNN...")
 	model_file = 'VGGnet_fast_rcnn_iter_70000.h5'
 	model_frcnn = FasterRCNN()
 	network.load_net(model_file, model_frcnn)
 	model_frcnn.cuda()
 	model_frcnn.eval()
-	print("Done!")
+	print("Done!")'''
 
 	# create DQN's for the next object, predicates, and attributes
 	print("Creating DQN models...")

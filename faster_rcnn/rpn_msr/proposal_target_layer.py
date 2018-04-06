@@ -10,7 +10,7 @@ import numpy as np
 import numpy.random as npr
 import pdb
 
-from ..utils.cython_bbox import bbox_overlaps, bbox_intersections
+#from ..utils.cython_bbox import bbox_overlaps, bbox_intersections
 
 # TODO: make fast_rcnn irrelevant
 # >>>> obsolete, because it depends on sth outside of this project
