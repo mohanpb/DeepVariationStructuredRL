@@ -8,9 +8,9 @@ import os
 import sys
 
 # files to read
-OBJECTS_FILE = "data/raw_data/objects.json"
-PREDICATES_FILE = "data/raw_data/relationships.json"
-ATTRIBUTES_FILE = "data/raw_data/attributes.json"
+OBJECTS_FILE = "../data/raw_data/objects.json"
+PREDICATES_FILE = "../data/raw_data/relationships.json"
+ATTRIBUTES_FILE = "../data/raw_data/attributes.json"
 
 def add_objects(graph, object_data, entity_counts, min_occurrences):
 	for image in object_data:
@@ -92,9 +92,9 @@ def main():
 	MIN_OCCURRENCES = args.minimum_occurrances
 
 	# load graph if exists
-	if os.path.isfile("graph.pickle"):
+	if os.path.isfile("../data/graph.pickle"):
 		print("Loading graph from file...")
-		loaded_graph_file = open("graph.pickle", "rb")
+		loaded_graph_file = open("../data/graph.pickle", "rb")
 		graph = pickle.load(loaded_graph_file)
 		loaded_graph_file.close()
 		print("Done!")
@@ -103,7 +103,7 @@ def main():
 		graph = Semantic_Action_Graph()
 
 	print("Loading entity counts file...")
-	entity_counts = json.load(open("entity_counts.json", "rb"))
+	entity_counts = json.load(open("../data/entity_counts.json", "rb"))
 	print("Done!")
 	
 	# adding nodes/edges	
@@ -123,7 +123,7 @@ def main():
 		predicate_data = json.load(open(PREDICATES_FILE))
 		print("Done!")
 		print("Loading predicate counts file...")
-		predicate_counts = json.load(open("predicate_counts.json", "rb"))
+		predicate_counts = json.load(open("../data/predicate_counts.json", "rb"))
 		print("Done!")
 
 		print("Adding predicate nodes and predicate edges...")
@@ -137,7 +137,7 @@ def main():
 		attribute_data = json.load(open(ATTRIBUTES_FILE))
 		print("Done!")
 		print("Loading attribute counts file...")
-		attribute_counts = json.load(open("attribute_counts.json", "rb"))
+		attribute_counts = json.load(open("../data/attribute_counts.json", "rb"))
 		print("Done!")
 
 		print("Adding attribute nodes and attribute edges...")
@@ -147,7 +147,7 @@ def main():
 		sys.exit(0)
 
 	print("Done adding nodes/edges to graph. Saved in graph.pickle")
-	with open("graph.pickle", "wb") as handle:
+	with open("../data/graph.pickle", "wb") as handle:
 		pickle.dump(graph, handle)
 
 	#print("Renaming saved_graph.pickle as graph.pickle...")

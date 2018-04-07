@@ -17,7 +17,6 @@ import torch
 import torch.nn as nn
 import argparse
 import json
-import dill
 import pickle
 import numpy as np
 import random
@@ -106,7 +105,6 @@ def train(parameters, train=True):
 					# reset image state from last epoch
 					image_states[image_name].reset()
 				im_state = image_states[image_name]	
-				print time.time()
 				while not im_state.is_done():
 					#print time.time()
 					#print("Iter for image " + str(image_name))
@@ -190,12 +188,16 @@ def train(parameters, train=True):
 					# sample minibatch if replay_buffer has enough samples
 					if replay_buffer.can_sample():
 						#print("Sample minibatch of transitions...")
+						print time.time()
 						minibatch_transitions = replay_buffer.sample(parameters["batch_size"])
 						main_q_attribute_list, main_q_predicate_list, main_q_next_object_list = [], [], []
 						target_q_attribute_list, target_q_predicate_list, target_q_next_object_list = [], [], []
+						print time.time()
 						for transition in minibatch_transitions:
 							total_number_timesteps_taken += 1
 							target_q_attribute, target_q_predicate, target_q_next_object = None, None, None
+							
+							print time.time()
 							if transition.done:
 								target_q_attribute = transition.attribute_reward
 								target_q_predicate = transition.predicate_reward
@@ -215,12 +217,17 @@ def train(parameters, train=True):
 								if type(next_state_next_object) != type(None):
 									next_state_next_object.volatile = True
 									target_q_next_object = transition.next_object_reward + parameters["discount_factor"] * torch.max(model_next_object_target(next_state_next_object))[0]
+							
+							print time.time()
 							# compute loss
 							main_state_attribute = create_state_action_vector(transition.state, transition.attribute_actions, len(semantic_action_graph.attribute_nodes))
 							main_state_predicate = create_state_action_vector(transition.state, transition.predicate_actions, len(semantic_action_graph.predicate_nodes))
 							main_state_next_object = create_state_action_vector(transition.state, transition.next_object_actions, parameters["maximum_num_entities_per_image"])
 
 							main_q_attribute, main_q_predicate, main_q_next_object = None, None, None
+							
+							print time.time()
+							
 							if type(main_state_attribute) != type(None) and type(target_q_attribute) != type(None):	
 								main_q_attribute = transition.attribute_reward + parameters["discount_factor"] * torch.max(model_attribute_main(main_state_attribute))
 								#print("main & target preds", main_q_attribute, target_q_attribute)
@@ -232,6 +239,8 @@ def train(parameters, train=True):
 									param.grad.data.clamp_(-1, 1)
 								optimizer_attribute.step()
 
+							print time.time()
+							
 							if type(main_state_predicate) != type(None) and type(target_q_predicate) != type(None):
 								main_q_predicate = transition.predicate_reward + parameters["discount_factor"] * torch.max(model_predicate_main(main_state_predicate))
 								loss_predicate = loss_fn_predicate(main_q_predicate, target_q_predicate)
@@ -242,6 +251,8 @@ def train(parameters, train=True):
 									param.grad.data.clamp_(-1, 1)
 								optimizer_predicate.step()
 
+							print time.time()
+							
 							if type(main_state_next_object) != type(None) and type(target_q_next_object) != type(None):
 								main_q_next_object = transition.next_object_reward + parameters["discount_factor"] * torch.max(model_next_object_main(main_state_next_object))
 								loss_next_object = loss_fn_next_object(main_q_next_object, target_q_next_object)
@@ -252,19 +263,24 @@ def train(parameters, train=True):
 									param.grad.data.clamp_(-1, 1)
 								optimizer_next_object.step()
 
+							print time.time()
+							print
+					
 					# update target weights if it has been tao steps
 					if total_number_timesteps_taken % target_update_frequency == 0:
 						#print("UPDATING TARGET NOW")
 						update_target(model_attribute_main, model_attribute_target)
 						update_target(model_predicate_main, model_predicate_target)
 						update_target(model_next_object_main, model_next_object_target)
+					print 
+					print
 			
 	gt_graphs = []
 	our_graphs = []
 	for ims in image_states.values():
 		gt_graphs.append(ims.gt_scene_graph)
 		our_graphs.append(ims.current_scene_graph)	
-	with open("image_states.pickle", "wb") as handle:
+	with open("../data/image_states.pickle", "wb") as handle:
 		pickle.dump({"gt": gt_graphs, "curr": our_graphs}, handle)
 
 
@@ -343,16 +359,16 @@ if __name__=='__main__':
 	# flags
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--train_data", type=str,
-				default="data/data_samples/train_data.json",
+				default="../data/data_samples/train_data.json",
 				help='Location of the file containing train data samples')
 	parser.add_argument("--validation_data", type=str,
-				default="data/data_samples/validation_data.json",
+				default="../data/data_samples/validation_data.json",
 				help='Location of the file containing validation data samples')
 	parser.add_argument("--test_data", type=str,
-				default="data/data_samples/test_data.json",
+				default="../data/data_samples/test_data.json",
 				help='Location of the file containing test data samples')
 	parser.add_argument("--images_dir", type=str,
-				default="data/images/VG_100K/",
+				default="../data/images/VG_100K/",
 				help="Location of Visual Genome images")
 	parser.add_argument("--train", help="trains model", action="store_true")
 	parser.add_argument("--test", help="evaluates model", action="store_true")
@@ -403,7 +419,7 @@ if __name__=='__main__':
 
 	# create semantic action graph
 	print("Loading graph.pickle...")
-	semantic_action_graph = pickle.load(open("graph.pickle", "rb"))
+	semantic_action_graph = pickle.load(open("../data/graph.pickle", "rb"))
 	print("Done!")	
 
 	# create VGG model for state featurization
@@ -471,5 +487,4 @@ if __name__=='__main__':
 		test_dataset = VGDataset(test_data_samples, args.images_dir)
 		test_data_loader = DataLoader(dataset=test_dataset, batch_size=args.batch_size,
 									shuffle=True, num_workers=args.num_workers)
-		test_images_state = evaluate(test_data_loader)
-
+test_images_state = evaluate(test_data_loader)

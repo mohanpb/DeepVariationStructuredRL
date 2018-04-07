@@ -3,8 +3,8 @@ from utils.vg_utils import entity_to_aliases, predicate_to_aliases
 import json
 
 # file to read
-SCENE_GRAPH_FILE = "data/raw_data/scene_graphs.json"
-ATTRIBUTES_FILE = "data/raw_data/attributes.json"
+SCENE_GRAPH_FILE = "../data/raw_data/scene_graphs.json"
+ATTRIBUTES_FILE = "../data/raw_data/attributes.json"
 
 entity_counts = {}
 predicate_counts = {}
@@ -46,12 +46,12 @@ def main():
 	get_entity_predicate_counts(scene_graph_data)
 
 	print("Saving entity counts...")
-	with open("entity_counts.json", "w") as outfile:
+	with open("../data/entity_counts.json", "w") as outfile:
 		json.dump(entity_counts, outfile)
 	print("Done!")
 
 	print("Saving predicate counts...")
-	with open("predicate_counts.json", "w") as outfile:
+	with open("../data/predicate_counts.json", "w") as outfile:
 		json.dump(predicate_counts, outfile)
 	print("Done!")
 
@@ -62,7 +62,7 @@ def main():
 	print("Done!")
 	get_attribute_counts(attributes_data)	
 	print("Saving attribute counts...")
-	with open("attribute_counts.json", "w") as outfile:
+	with open("../data/attribute_counts.json", "w") as outfile:
 		json.dump(attribute_counts, outfile)
 	print("Done!")
 
