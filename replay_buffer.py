@@ -1,8 +1,8 @@
 from collections import namedtuple
 import random
 
-Transition = namedtuple('Transition', ('state', 'next_state', 'attribute_actions', 'predicate_actions', 
-					'next_object_actions', 'attribute_reward', 'predicate_reward', 
+Transition = namedtuple('Transition', ('state', 'next_state', 'attribute_action', 'predicate_action', 
+					'next_object_action', 'attribute_reward', 'predicate_reward', 
 					'next_object_reward', 'next_state_attribute_actions', 
 					'next_state_predicate_actions', 'next_state_next_object_actions', 'done'))
 

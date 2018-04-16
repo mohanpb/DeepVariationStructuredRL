@@ -6,13 +6,13 @@ class VGG16(nn.Module):
 	def __init__(self):
 		super(VGG16, self).__init__()
 		resnet = models.resnet50(pretrained=True)
-		modules = list(resnet.children())[:-1] # delete the last fc layer.
-    		self.model = nn.Sequential(*modules)
-    		for param in self.model.parameters():
+		modules = list(resnet.children())[:-2] # delete the last fc layer.
+		self.model = nn.Sequential(*modules)
+		for param in self.model.parameters():
 			param.requires_grad = False
     
 	def forward(self, x):
-        	return self.model(x)
+    	return self.model(x)
 
 class DQN(nn.Module):
 	"""
@@ -57,7 +57,4 @@ class DQN_MLP(nn.Module):
 
 	def forward(self, x):
 		return self.softmax(self.layers(x))
-
-
-
 

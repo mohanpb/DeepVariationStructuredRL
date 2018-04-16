@@ -14,6 +14,8 @@ class ImageState():
 
 		# entities chosen to explore so far
 		self.explored_entities = []
+		# entities to explore
+		self.entity_queue = []
 	
 		# entity currently being explored
 		self.current_subject = None
@@ -32,6 +34,7 @@ class ImageState():
 		# per subject for attributes and next object
 		self.previously_mined_attributes = defaultdict(lambda: [])
 		self.previously_mined_next_objects = defaultdict(lambda: [])
+
 
 	def initialize_entities(self, entity_proposals, entity_classes, entity_scores):
 		for i in range(len(entity_classes)):
@@ -85,40 +88,57 @@ class ImageState():
 		self.previously_mined_next_objects = defaultdict(lambda: [])
 		self.initialize_entities(self.entity_proposals, self.entity_classes, self.entity_scores)
 
+
 	def step(self, attribute_action, predicate_action, next_object_action):
 		# should return reward_attribute, reward_predicate, and 
 		# reward_next_object, and boolean indicating whether done
 		reward_attribute, reward_predicate, reward_next_object = -1, -1, -1 
 		pred_attribute_name = self.graph.attribute_nodes[attribute_action].name if attribute_action != None else None
 		pred_predicate_name = self.graph.predicate_nodes[predicate_action].name if predicate_action != None else None
+		pred_next_action_name = self.graph.predicate_nodes[next_object_action].name if next_object_action != None else None
 		if attribute_action != None:
 			self.add_attribute(self.current_subject, attribute_action)
 		if pred_predicate_name != None:
 			self.add_predicate(self.current_subject, pred_predicate_name, self.current_object)
 		self.objects_explored_per_subject[self.current_subject].append(self.current_object)
                
-		gt_subject_index = self.overlaps(self.current_subject)
-		if gt_subject_index != -1: #overlap
-			if "attributes" in self.gt_scene_graph["labels"]["objects"][gt_subject_index] and pred_attribute_name in self.gt_scene_graph["labels"]["objects"][gt_subject_index]["attributes"]:
-				reward_attribute = 1
-			gt_object_index = self.overlaps(self.current_object)
-			if gt_object_index != -1:
-				for relationship_dict in self.gt_scene_graph["labels"]["relationships"]:
-					if pred_predicate_name == relationship_dict["predicate"] and \
-						gt_subject_index == relationship_dict["subject_id"] and \
-						gt_object_index == relationship_dict["object_id"]:
-						reward_predicate = 1
-						break
+		# removed as not necessary with ground truth
+		# gt_subject_index = self.overlaps(self.current_subject)
+		# if gt_subject_index != -1: #overlap
+		if "attributes" in self.gt_scene_graph["labels"]["objects"][gt_subject_index] and pred_attribute_name in self.gt_scene_graph["labels"]["objects"][gt_subject_index]["attributes"]:
+			reward_attribute = 1
+		# gt_object_index = self.overlaps(self.current_object)
+		# if gt_object_index != -1:
 
-		if next_object_action != None and next_object_action < len(self.entity_proposals):
-			gt_new_object_index = self.overlaps(next_object_action)
-			#self.explored_entities.append(new_object_index)
-			if gt_new_object_index != -1:
-				if gt_new_object_index not in self.explored_entities:
-					reward_next_object = 5
-			self.current_object = next_object_action
-		else:
-			self.current_subject = None
+		# make HashMap
+		for relationship_dict in self.gt_scene_graph["labels"]["relationships"]:
+			if pred_predicate_name == relationship_dict["predicate"] and \
+				gt_subject_index == relationship_dict["subject_id"] and \
+				gt_object_index == relationship_dict["object_id"]:
+				reward_predicate = 1
+				break
+
+		# if next_object_action != None and next_object_action < len(self.entity_proposals):
+		# 	gt_new_object_index = self.overlaps(next_object_action)
+		# 	#self.explored_entities.append(new_object_index)
+		# 	if gt_new_object_index != -1:
+		# 		if gt_new_object_index not in self.explored_entities:
+		# 			reward_next_object = 5
+		# 	self.current_object = next_object_action
+		# else:
+		# 	self.current_subject = None
+		
+		# make this fast
+		if next_object_action != None:
+			for index, obj_dict in enumerate(self.gt_scene_graph["labels"]["objects"]):
+				obj_name = obj_dict["name"] if "name" in obj_dict else obj_dict["names"][0]
+				if pred_next_action_name == obj_name:
+					self.current_object = index
+					if index not in self.explored_entities:
+						reward_next_object = 5
+					# add to queue of BFS
+					entity_queue.append(index)
+					break
 		return reward_attribute, reward_predicate, reward_next_object, self.is_done()
 
 	def overlaps(self, entity_id):

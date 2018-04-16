@@ -1,6 +1,7 @@
+import math
 from PIL import Image
+import torch
 from torchvision import transforms
-
 import numpy as np
 
 OBJECT_ALIAS_FILE = "../data/raw_data/object_alias.txt"
@@ -31,7 +32,7 @@ def find_object_neighbors(subject_bbox, entity_proposals, previously_mined_objec
 	for o, obj in enumerate(entity_proposals):
 		if o not in previously_mined_objects and obj.all() != subject_bbox.all():
 			if abs(obj[0] - x) < 0.5 * (obj[2] + w) and abs(obj[1] - y) < 0.5 * (obj[3] + h):
-					neighboring_objects.append(o)
+				neighboring_objects.append(o)
 	return neighboring_objects
 
 def crop_box(image_arr, box):
@@ -41,6 +42,14 @@ def crop_box(image_arr, box):
 	transform = transforms.Compose([transforms.Resize((224,224)), transforms.ToTensor(),
 					transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 	return transform(crop_box).unsqueeze(0)
+
+def object_features(image, image_feats, box):
+	size = image.size
+	box = [1.0*box[0]/size[0], 1.0*box[1]/size[1], 1.0*box[2]/size[0], 1.0*box[3]/size[1]]
+	box = [math.floor(7*x) for x in box]
+	object_features = image_feats[box[0]:box[2],box[1]:box[3]]
+	object_features = torch.mean(torch.mean(object_features,1),0)
+	return object_features
 
 # HELPER FUNCTIONS
 

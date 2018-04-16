@@ -7,7 +7,7 @@ from operator import itemgetter
 #from faster_rcnn.faster_rcnn import FasterRCNN
 from image_state import ImageState
 from replay_buffer import ReplayMemory
-from utils.vg_utils import entity_to_aliases, predicate_to_aliases, find_object_neighbors, crop_box
+from utils.vg_utils import entity_to_aliases, predicate_to_aliases, find_object_neighbors, crop_box, object_features
 from PIL import Image
 from skip_thoughts import skipthoughts
 from collections import defaultdict
@@ -22,17 +22,20 @@ import numpy as np
 import random
 
 def train(parameters, train=True):
+	torch.set_default_tensor_type('torch.cuda.FloatTensor')
 	print("CUDA Available: " + str(torch.cuda.is_available()))
 	# make model CUDA
 	if torch.cuda.is_available():
 		model_VGG = model_vgg.cuda()
 		#model_FRCNN = model_frcnn.cuda()
-		model_next_object_main = DQN_next_object_main.cuda()
-		model_next_object_target = DQN_next_object_target.cuda()	
-		model_attribute_main = DQN_attribute_main.cuda()
-		model_attribute_target = DQN_attribute_target.cuda()
-		model_predicate_main = DQN_predicate_main.cuda()
-		model_predicate_target = DQN_predicate_target.cuda()
+		model_main = DQN_main.cuda()
+		model_target = DQN_target.cuda()
+		# model_next_object_main = DQN_next_object_main.cuda()
+		# model_next_object_target = DQN_next_object_target.cuda()	
+		# model_attribute_main = DQN_attribute_main.cuda()
+		# model_attribute_target = DQN_attribute_target.cuda()
+		# model_predicate_main = DQN_predicate_main.cuda()
+		# model_predicate_target = DQN_predicate_target.cuda()
 
 	# keeps track of current scene graphs for images
 	image_states = {}
@@ -65,7 +68,7 @@ def train(parameters, train=True):
 				image_name = gt_scene_graph[idx]["image_name"]
 				if image_name not in image_states:
 					gt_sg = gt_scene_graph[idx]
-					image_feature = images[idx]
+					image_feature = torch.mean(torch.mean(images[idx],1),0)
 					entity_proposals, entity_scores, entity_classes = [], [], []
 					for obj in gt_scene_graph[idx]["labels"]["objects"]:
 						entity_proposals.append([obj["x"], obj["y"], obj["x"] + obj["w"], obj["y"] + obj["h"]])
@@ -86,17 +89,15 @@ def train(parameters, train=True):
 						continue
 
 					entity_features = []
-					t1 = time.time()
 					for box in entity_proposals:
-						cropped_entity = crop_box(images_orig[idx], box)
-						cropped_entity = torch.autograd.Variable(cropped_entity)
-						if torch.cuda.is_available():
-							cropped_entity = cropped_entity.cuda()
-						box_feature = model_VGG(cropped_entity)
+						# cropped_entity = crop_box(images_orig[idx], box)
+						# cropped_entity = torch.autograd.Variable(cropped_entity)
+						# if torch.cuda.is_available():
+						# 	cropped_entity = cropped_entity.cuda()
+						# box_feature = model_VGG(cropped_entity)
+						box_feature = object_features(images_orig[idx], images[idx], box)
 						entity_features.append(box_feature)
-					t2 = time.time()
 					print len(entity_features)
-					print 'time=', t2-t1
 					im_state = ImageState(gt_sg["image_name"], gt_sg, image_feature, entity_features,
 											entity_proposals, entity_classes, entity_scores, semantic_action_graph)
 					im_state.initialize_entities(entity_proposals, entity_classes, entity_scores)
@@ -106,11 +107,7 @@ def train(parameters, train=True):
 					image_states[image_name].reset()
 				im_state = image_states[image_name]	
 				while not im_state.is_done():
-					#print time.time()
 					#print("Iter for image " + str(image_name))
-
-					# get the image state object for image
-					im_state = image_states[image_name]
 	
 					#print("Computing state vector")
 					# compute state vector of image
@@ -133,28 +130,39 @@ def train(parameters, train=True):
 					subject_bbox = im_state.entity_proposals[subject_id]
 					previously_mined_attributes = im_state.current_scene_graph["objects"][subject_id]["attributes"]
 					previously_mined_next_objects = im_state.objects_explored_per_subject[subject_id]
-					
-					if args.use_adaptive_action_sets:
-						attribute_adaptive_actions, predicate_adaptive_actions = semantic_action_graph.variation_based_traversal(subject_name, object_name, previously_mined_attributes)
-						next_object_adaptive_actions = find_object_neighbors(subject_bbox, im_state.entity_proposals, previously_mined_next_objects)
-					else:
-						attribute_adaptive_actions = range(len(semantic_action_graph.attribute_nodes))
-						predicate_adaptive_actions = range(len(semantic_action_graph.predicate_nodes))
-						next_object_adaptive_actions = range(len(im_state.entity_proposals)-1)	
-	
+
+					output = model_main(state_vector)
+
+					# constraints 
+					# list of possible actions
+					attribute_adaptive_actions, predicate_adaptive_actions = semantic_action_graph.variation_based_traversal(subject_name, object_name, previously_mined_attributes)
+					object_neighbours = find_object_neighbors(subject_bbox, im_state.entity_proposals, previously_mined_next_objects)
+					# added terminal action
+					next_object_adaptive_actions = sorted(list(set([im_state.entity_classes[x] for x in object_neighbours]+[1293])))
+
+					# if args.use_adaptive_action_sets:
+					# 	attribute_adaptive_actions, predicate_adaptive_actions = semantic_action_graph.variation_based_traversal(subject_name, object_name, previously_mined_attributes)
+					# 	next_object_adaptive_actions = find_object_neighbors(subject_bbox, im_state.entity_proposals, previously_mined_next_objects)
+					# else:
+					# 	attribute_adaptive_actions = range(len(semantic_action_graph.attribute_nodes))
+					# 	predicate_adaptive_actions = range(len(semantic_action_graph.predicate_nodes))
+					# 	next_object_adaptive_actions = range(len(im_state.entity_proposals)+1)	
+
 					# creating state + action vectors to feed in DQN
 					#print("Creating state + action vectors to pass into DQN...")
-					attribute_state_vectors = create_state_action_vector(state_vector, attribute_adaptive_actions, len(semantic_action_graph.attribute_nodes))
-					predicate_state_vectors = create_state_action_vector(state_vector, predicate_adaptive_actions, len(semantic_action_graph.predicate_nodes))
-					next_object_state_vectors = create_state_action_vector(state_vector, next_object_adaptive_actions, parameters["maximum_num_entities_per_image"])
+					# attribute_state_vectors = create_state_action_vector(state_vector, attribute_adaptive_actions, len(semantic_action_graph.attribute_nodes))
+					# predicate_state_vectors = create_state_action_vector(state_vector, predicate_adaptive_actions, len(semantic_action_graph.predicate_nodes))
+					# next_object_state_vectors = create_state_action_vector(state_vector, next_object_adaptive_actions, parameters["maximum_num_entities_per_image"])
 		
 					# choose action using epsilon greedy
-					#print("Choose action using epsilon greedy...")
-					attribute_action, predicate_action, next_object_action = None, None, None
-					if type(attribute_state_vectors) != type(None):
-						attribute_action = choose_action_epsilon_greedy(attribute_state_vectors, attribute_adaptive_actions, model_attribute_main, parameters["epsilon"], training=replay_buffer.can_sample())
-					if type(predicate_state_vectors) != type(None):
-						predicate_action = choose_action_epsilon_greedy(predicate_state_vectors, predicate_adaptive_actions, model_predicate_main, parameters["epsilon"], training=replay_buffer.can_sample())
+					# print("Choose action using epsilon greedy...")
+					# attribute_action, predicate_action, next_object_action = None, None, None
+					# if type(attribute_state_vectors) != type(None):
+					# 	attribute_action = choose_action_epsilon_greedy(attribute_state_vectors, attribute_adaptive_actions, model_attribute_main, parameters["epsilon"], training=replay_buffer.can_sample())
+					# if type(predicate_state_vectors) != type(None):
+					# 	predicate_action = choose_action_epsilon_greedy(predicate_state_vectors, predicate_adaptive_actions, model_predicate_main, parameters["epsilon"], training=replay_buffer.can_sample())
+					
+					attribute_action, predicate_action, next_object_action = choose_actions(output, attribute_adaptive_actions, predicate_adaptive_actions, next_object_adaptive_actions, parameters["epsilon"])
 					
 					# update skip thought vector
 					if predicate_action != None and args.use_skip_thought:
@@ -162,11 +170,11 @@ def train(parameters, train=True):
 					if len(skip_thought_dict[(im_state.current_subject, im_state.current_object)]) > 2:
 						skip_thought_dict[(im_state.current_subject, im_state.current_object)].pop(0)
 
-					if type(next_object_state_vectors) != type(None):
-						next_object_action = choose_action_epsilon_greedy(next_object_state_vectors, next_object_adaptive_actions, model_next_object_main, parameters["epsilon"], training=replay_buffer.can_sample())
+					# if type(next_object_state_vectors) != type(None):
+					# 	next_object_action = choose_action_epsilon_greedy(next_object_state_vectors, next_object_adaptive_actions, model_next_object_main, parameters["epsilon"], training=replay_buffer.can_sample())
 					# step image_state
 					#print("Step state environment using action...")
-					attribute_reward, predicate_reward, next_object_reward, done = im_state.step(attribute_action, predicate_action, next_object_action)
+					attribute_reward, predicate_reward, next_object_reward, done = im_state.step(attribute_action[0], predicate_action[0], next_object_action[0])
 					#print("Rewards(A,P,O)", attribute_reward, predicate_reward, next_object_reward)
 					next_state = create_state_vector(im_state, skip_thought_dict)		
 					im_state = image_states[image_name]
@@ -180,100 +188,126 @@ def train(parameters, train=True):
 					object_name_1 = entity_to_aliases(im_state.entity_classes[im_state.current_object])
 					previously_mined_attributes_1 = im_state.current_scene_graph["objects"][im_state.current_subject]["attributes"]
 					previously_mined_next_objects_1 = im_state.objects_explored_per_subject[im_state.current_subject]
-					attribute_adaptive_actions_1, predicate_adaptive_actions_1 = semantic_action_graph.variation_based_traversal(subject_name_1, object_name_1, previously_mined_attributes)
-					next_object_adaptive_actions_1 = find_object_neighbors(im_state.entity_proposals[im_state.current_subject], im_state.entity_proposals, previously_mined_next_objects)
-
-					replay_buffer.push(state_vector, next_state, attribute_adaptive_actions, predicate_adaptive_actions, next_object_adaptive_actions, attribute_reward, predicate_reward, next_object_reward, attribute_adaptive_actions_1, predicate_adaptive_actions_1, next_object_adaptive_actions_1, done)
+					# attribute_adaptive_actions_1, predicate_adaptive_actions_1 = semantic_action_graph.variation_based_traversal(subject_name_1, object_name_1, previously_mined_attributes)
+					# next_object_adaptive_actions_1 = find_object_neighbors(im_state.entity_proposals[im_state.current_subject], im_state.entity_proposals, previously_mined_next_objects)
+					
+					subject_bbox_1 = im_state.entity_proposals[im_state.current_subject]
+					attribute_adaptive_actions_1, predicate_adaptive_actions_1 = semantic_action_graph.variation_based_traversal(subject_name_1, object_name_1, previously_mined_attributes_1)
+					object_neighbours = find_object_neighbors(subject_bbox_1, im_state.entity_proposals, previously_mined_next_objects_1)
+					# added terminal action
+					next_object_adaptive_actions_1 = sorted(list(set([im_state.entity_classes[x] for x in object_neighbours]+[1293])))
+					
+					replay_buffer.push(state_vector, next_state, attribute_action, predicate_action, next_object_action, attribute_reward, predicate_reward, next_object_reward, attribute_adaptive_actions_1, predicate_adaptive_actions_1, next_object_adaptive_actions_1, done)
 	
 					# sample minibatch if replay_buffer has enough samples
 					if replay_buffer.can_sample():
 						#print("Sample minibatch of transitions...")
-						print time.time()
 						minibatch_transitions = replay_buffer.sample(parameters["batch_size"])
 						main_q_attribute_list, main_q_predicate_list, main_q_next_object_list = [], [], []
 						target_q_attribute_list, target_q_predicate_list, target_q_next_object_list = [], [], []
-						print time.time()
-						for transition in minibatch_transitions:
-							total_number_timesteps_taken += 1
-							target_q_attribute, target_q_predicate, target_q_next_object = None, None, None
-							
-							print time.time()
-							if transition.done:
-								target_q_attribute = transition.attribute_reward
-								target_q_predicate = transition.predicate_reward
-								target_q_next_object = transition.target_q_next_object
-							else:
-								next_state_attribute = create_state_action_vector(transition.next_state, transition.next_state_attribute_actions, len(semantic_action_graph.attribute_nodes))
-								next_state_predicate = create_state_action_vector(transition.next_state, transition.next_state_predicate_actions, len(semantic_action_graph.predicate_nodes))
-								next_state_next_object = create_state_action_vector(transition.next_state, transition.next_state_next_object_actions, parameters["maximum_num_entities_per_image"])
-								if type(next_state_attribute) != type(None):
-									next_state_attribute.volatile = True
-									output = torch.max(model_attribute_target(next_state_attribute))[0]
-									#print("output of target model attributes", output)
-									target_q_attribute = transition.attribute_reward + parameters["discount_factor"] * output
-								if type(next_state_predicate) != type(None):
-									next_state_predicate.volatile = True
-									target_q_predicate = transition.predicate_reward + parameters["discount_factor"] * torch.max(model_predicate_target(next_state_predicate))[0]
-								if type(next_state_next_object) != type(None):
-									next_state_next_object.volatile = True
-									target_q_next_object = transition.next_object_reward + parameters["discount_factor"] * torch.max(model_next_object_target(next_state_next_object))[0]
-							
-							print time.time()
-							# compute loss
-							main_state_attribute = create_state_action_vector(transition.state, transition.attribute_actions, len(semantic_action_graph.attribute_nodes))
-							main_state_predicate = create_state_action_vector(transition.state, transition.predicate_actions, len(semantic_action_graph.predicate_nodes))
-							main_state_next_object = create_state_action_vector(transition.state, transition.next_object_actions, parameters["maximum_num_entities_per_image"])
+						
+						next_state_vectors = []
+						curr_state_vectors = []
+						actions = []
+						for indx,trans in enumerate(minibatch_transitions):
+							next_state_vectors.append(trans.next_state)
+							curr_state_vectors.append(trans.state)
+						output = model_main(torch.stack(curr_state_vectors,1))
+						output1 = model_target(torch.stack(next_state_vectors,1))
+						for indx,trans in enumerate(minibatch_transitions):
+							target_q_attribute = trans.attribute_reward
+							target_q_predicate = trans.predicate_reward
+							target_q_next_object = trans.next_object_reward
+							if !trans.done:
+								temp = output1[:742]
+								target_q_predicate+=parameters["discount_factor"]*torch.max(temp[trans.next_state_predicate_actions])
+								temp = output1[742:742+303]
+								target_q_attribute+=parameters["discount_factor"]*torch.max(temp[trans.next_state_attribute_actions])
+								temp = output1[742+303:]
+								target_q_next_object+=parameters["discount_factor"]*torch.max(temp[trans.next_state_next_object_actions])
+							expected.append(target_q_predicate)
+							expected.append(target_q_attribute)
+							expected.append(target_q_next_object)
+							predicted.append(output[trans.predicate_action])
+							predicted.append(output[742+trans.attribute_action])
+							predicted.append(output[742+303+trans.next_object_action])
+						loss = loss_fn(torch.stack(predicted,1), torch.stack(expected,1))
+						#print("Loss attribute: " + str(loss_attribute.data[0]))	
+						optimizer_attribute.zero_grad()	
+						loss.backward()
+						for param in model_main.parameters():
+							param.grad.data.clamp_(-1, 1)
+						optimizer.step()
 
-							main_q_attribute, main_q_predicate, main_q_next_object = None, None, None
+						# for transition in minibatch_transitions:
+						# 	total_number_timesteps_taken += 1
+						# 	target_q_attribute, target_q_predicate, target_q_next_object = None, None, None
 							
-							print time.time()
+						# 	if transition.done:
+						# 		target_q_attribute = transition.attribute_reward
+						# 		target_q_predicate = transition.predicate_reward
+						# 		target_q_next_object = transition.target_q_next_object
+						# 	else:
+						# 		next_state_attribute = create_state_action_vector(transition.next_state, transition.next_state_attribute_actions, len(semantic_action_graph.attribute_nodes))
+						# 		next_state_predicate = create_state_action_vector(transition.next_state, transition.next_state_predicate_actions, len(semantic_action_graph.predicate_nodes))
+						# 		next_state_next_object = create_state_action_vector(transition.next_state, transition.next_state_next_object_actions, parameters["maximum_num_entities_per_image"])
+						# 		if type(next_state_attribute) != type(None):
+						# 			next_state_attribute.volatile = True
+						# 			output = torch.max(model_attribute_target(next_state_attribute))[0]
+						# 			#print("output of target model attributes", output)
+						# 			target_q_attribute = transition.attribute_reward + parameters["discount_factor"] * output
+						# 		if type(next_state_predicate) != type(None):
+						# 			next_state_predicate.volatile = True
+						# 			target_q_predicate = transition.predicate_reward + parameters["discount_factor"] * torch.max(model_predicate_target(next_state_predicate))[0]
+						# 		if type(next_state_next_object) != type(None):
+						# 			next_state_next_object.volatile = True
+						# 			target_q_next_object = transition.next_object_reward + parameters["discount_factor"] * torch.max(model_next_object_target(next_state_next_object))[0]
 							
-							if type(main_state_attribute) != type(None) and type(target_q_attribute) != type(None):	
-								main_q_attribute = transition.attribute_reward + parameters["discount_factor"] * torch.max(model_attribute_main(main_state_attribute))
-								#print("main & target preds", main_q_attribute, target_q_attribute)
-								loss_attribute = loss_fn_attribute(main_q_attribute, target_q_attribute)
-								#print("Loss attribute: " + str(loss_attribute.data[0]))	
-								optimizer_attribute.zero_grad()	
-								loss_attribute.backward()
-								for param in model_attribute_main.parameters():
-									param.grad.data.clamp_(-1, 1)
-								optimizer_attribute.step()
+						# 	# compute loss
+						# 	main_state_attribute = create_state_action_vector(transition.state, transition.attribute_actions, len(semantic_action_graph.attribute_nodes))
+						# 	main_state_predicate = create_state_action_vector(transition.state, transition.predicate_actions, len(semantic_action_graph.predicate_nodes))
+						# 	main_state_next_object = create_state_action_vector(transition.state, transition.next_object_actions, parameters["maximum_num_entities_per_image"])
 
-							print time.time()
+						# 	main_q_attribute, main_q_predicate, main_q_next_object = None, None, None
+														
+						# 	if type(main_state_attribute) != type(None) and type(target_q_attribute) != type(None):	
+						# 		main_q_attribute = transition.attribute_reward + parameters["discount_factor"] * torch.max(model_attribute_main(main_state_attribute))
+						# 		#print("main & target preds", main_q_attribute, target_q_attribute)
+						# 		loss_attribute = loss_fn_attribute(main_q_attribute, target_q_attribute)
+						# 		#print("Loss attribute: " + str(loss_attribute.data[0]))	
+						# 		optimizer_attribute.zero_grad()	
+						# 		loss_attribute.backward()
+						# 		for param in model_attribute_main.parameters():
+						# 			param.grad.data.clamp_(-1, 1)
+						# 		optimizer_attribute.step()
 							
-							if type(main_state_predicate) != type(None) and type(target_q_predicate) != type(None):
-								main_q_predicate = transition.predicate_reward + parameters["discount_factor"] * torch.max(model_predicate_main(main_state_predicate))
-								loss_predicate = loss_fn_predicate(main_q_predicate, target_q_predicate)
-								optimizer_predicate.zero_grad()
-								#print("Loss predicate: " + str(loss_predicate.data[0]))	
-								loss_predicate.backward()
-								for param in model_predicate_main.parameters():
-									param.grad.data.clamp_(-1, 1)
-								optimizer_predicate.step()
-
-							print time.time()
+						# 	if type(main_state_predicate) != type(None) and type(target_q_predicate) != type(None):
+						# 		main_q_predicate = transition.predicate_reward + parameters["discount_factor"] * torch.max(model_predicate_main(main_state_predicate))
+						# 		loss_predicate = loss_fn_predicate(main_q_predicate, target_q_predicate)
+						# 		optimizer_predicate.zero_grad()
+						# 		#print("Loss predicate: " + str(loss_predicate.data[0]))	
+						# 		loss_predicate.backward()
+						# 		for param in model_predicate_main.parameters():
+						# 			param.grad.data.clamp_(-1, 1)
+						# 		optimizer_predicate.step()
 							
-							if type(main_state_next_object) != type(None) and type(target_q_next_object) != type(None):
-								main_q_next_object = transition.next_object_reward + parameters["discount_factor"] * torch.max(model_next_object_main(main_state_next_object))
-								loss_next_object = loss_fn_next_object(main_q_next_object, target_q_next_object)
-								optimizer_next_object.zero_grad()
-								#print("Loss next object: " + str(loss_next_object.data[0]))	
-								loss_next_object.backward()
-								for param in model_next_object_main.parameters():
-									param.grad.data.clamp_(-1, 1)
-								optimizer_next_object.step()
+						# 	if type(main_state_next_object) != type(None) and type(target_q_next_object) != type(None):
+						# 		main_q_next_object = transition.next_object_reward + parameters["discount_factor"] * torch.max(model_next_object_main(main_state_next_object))
+						# 		loss_next_object = loss_fn_next_object(main_q_next_object, target_q_next_object)
+						# 		optimizer_next_object.zero_grad()
+						# 		#print("Loss next object: " + str(loss_next_object.data[0]))	
+						# 		loss_next_object.backward()
+						# 		for param in model_next_object_main.parameters():
+						# 			param.grad.data.clamp_(-1, 1)
+						# 		optimizer_next_object.step()
 
-							print time.time()
-							print
 					
 					# update target weights if it has been tao steps
 					if total_number_timesteps_taken % target_update_frequency == 0:
 						#print("UPDATING TARGET NOW")
-						update_target(model_attribute_main, model_attribute_target)
-						update_target(model_predicate_main, model_predicate_target)
-						update_target(model_next_object_main, model_next_object_target)
-					print 
-					print
+						update_target(model_main, model_target)
+						# update_target(model_predicate_main, model_predicate_target)
+						# update_target(model_next_object_main, model_next_object_target)
 			
 	gt_graphs = []
 	our_graphs = []
@@ -285,19 +319,28 @@ def train(parameters, train=True):
 
 
 def create_state_vector(image_state, skip_thought_dict):
+	
 	# find subject to start with if curr_subject is None
 	if image_state.current_subject == None or len(image_state.objects_explored_per_subject[image_state.current_subject]) >= image_state.max_objects_to_explore:
-		curr_subject_feature = None
-		for idx in range(len(image_state.entity_scores)):
-			if idx not in image_state.explored_entities:
-				curr_subject_feature = image_state.entity_features[idx]
-				image_state.explored_entities.append(idx)
-				image_state.current_subject = idx
-				break
-		if type(curr_subject_feature) == type(None):
-			return None
+		if len(image_state.entity_queue)>0:
+			idx = image_state.entity_queue
+			del image_state.entity_queue[0]
+			image_state.explored_entities.append(idx)
+			curr_subject_feature = image_state.entity_features[idx]
+			image_state.current_subject = idx
+		else:
+			curr_subject_feature = None
+			for idx in range(len(image_state.entity_scores)):
+				if idx not in image_state.explored_entities:
+					curr_subject_feature = image_state.entity_features[idx]
+					image_state.explored_entities.append(idx)
+					image_state.current_subject = idx
+					break
+			if type(curr_subject_feature) == type(None):
+				return None
 	else:	
 		curr_subject_feature = image_state.entity_features[image_state.current_subject]
+	
 	# find object for this state if object is none
 	if image_state.current_object == None:
 		curr_object_id = len(image_state.objects_explored_per_subject[image_state.current_subject])
@@ -308,6 +351,7 @@ def create_state_vector(image_state, skip_thought_dict):
 			return None
 		image_state.current_object = curr_object_id
 		#image_state.current_object = curr_object_id[0]
+	
 	subject_name = image_state.entity_classes[image_state.current_subject]
 	object_name = image_state.entity_classes[image_state.current_object]
 	# get skip thought encoding
@@ -352,6 +396,32 @@ def choose_action_epsilon_greedy(state, adaptive_action_set, model, epsilon, tra
 	else: # explore
 		return random.choice(adaptive_action_set)
 
+def choose_actions(output, attribute_adaptive_actions, predicate_adaptive_actions, next_object_adaptive_actions, epsilon, training=True):
+	actions = []
+	output1 = output[:742]
+	if random.random()>epsilon and training:
+		max_v,idx = torch.max(output1[attribute_adaptive_actions],0)
+		actions.append((attribute_adaptive_actions[idx], max_v))
+	else:
+		act = random.choice(attribute_adaptive_actions)
+		actions.append((act,output1[act]))
+	output1 = output[742:742+303]
+	if random.random()>epsilon and training:
+		max_v,idx = torch.max(output1[predicate_adaptive_actions],0)
+		actions.append((predicate_adaptive_actions[idx], max_v))
+	else:
+		act = random.choice(predicate_adaptive_actions)
+		actions.append((act,output1[act]))
+	output1 = output[742+303:]
+	if random.random()>epsilon and training:
+		max_v,idx = torch.max(output1[next_object_adaptive_actions],0)
+		actions.append((next_object_adaptive_actions[idx], max_v))
+	else:
+		act = random.choice(next_object_adaptive_actions)
+		actions.append((act,output1[act]))
+	return actions
+
+
 def update_target(main_model, target_model):
 	target_model.load_state_dict(main_model.state_dict())	
 
@@ -383,7 +453,7 @@ if __name__=='__main__':
 	parser.add_argument("--replay_buffer_capacity", type=int, default=20000, help="maximum size of the replay buffer")
 	parser.add_argument("--replay_buffer_minimum_number_samples", type=int, default=8, help="Minimum replay buffer size before we can sample")
 	parser.add_argument("--object_detection_threshold", type=float, default=0.005, help="threshold for Faster RCNN module when detecting objects")
-	parser.add_argument("--maximum_num_entities_per_image", type=int, default=500, help="maximum number of entities to explore per image")
+	parser.add_argument("--maximum_num_entities_per_image", type=int, default=200, help="maximum number of entities to explore per image")
 	parser.add_argument("--maximum_adaptive_action_space_size", type=int, default=20, help="maximum size of adaptive_action space")
 	parser.add_argument("--num_workers", type=int, default=4, help="number of threads")
 	parser.add_argument("--use_adaptive_action_sets", help="Whether to use adaptive actions sets or not", action="store_true")
@@ -420,7 +490,7 @@ if __name__=='__main__':
 	# create semantic action graph
 	print("Loading graph.pickle...")
 	semantic_action_graph = pickle.load(open("../data/graph.pickle", "rb"))
-	print("Done!")	
+	print("Done!")
 
 	# create VGG model for state featurization
 	print("Loading VGG model...")
@@ -438,12 +508,14 @@ if __name__=='__main__':
 
 	# create DQN's for the next object, predicates, and attributes
 	print("Creating DQN models...")
-	DQN_next_object_main = DQN_MLP(2048*3+9600 + parameters["maximum_num_entities_per_image"], 1)
-	DQN_next_object_target = DQN_MLP(2048*3+9600 + parameters["maximum_num_entities_per_image"], 1)
-	DQN_predicate_main = DQN_MLP(2048*3+9600 + len(semantic_action_graph.predicate_nodes), 1)
-	DQN_predicate_target = DQN_MLP(2048*3+9600 + len(semantic_action_graph.predicate_nodes), 1)
-	DQN_attribute_main = DQN_MLP(2048*3+9600 + len(semantic_action_graph.attribute_nodes), 1)
-	DQN_attribute_target = DQN_MLP(2048*3+9600 + len(semantic_action_graph.attribute_nodes), 1)
+	DQN_main = DQN_MLP(2048*3+9600, 1+1293+303+742, 1024, 2)
+	DQN_target = DQN_MLP(2048*3+9600, 1+1293+303+742, 1024, 2)
+	# DQN_next_object_main = DQN_MLP(2048*3+9600 + parameters["maximum_num_entities_per_image"], 1)
+	# DQN_next_object_target = DQN_MLP(2048*3+9600 + parameters["maximum_num_entities_per_image"], 1)
+	# DQN_predicate_main = DQN_MLP(2048*3+9600 + len(semantic_action_graph.predicate_nodes), 1)
+	# DQN_predicate_target = DQN_MLP(2048*3+9600 + len(semantic_action_graph.predicate_nodes), 1)
+	# DQN_attribute_main = DQN_MLP(2048*3+9600 + len(semantic_action_graph.attribute_nodes), 1)
+	# DQN_attribute_target = DQN_MLP(2048*3+9600 + len(semantic_action_graph.attribute_nodes), 1)
 	print("Done!")
 
 	# create shared optimizer
@@ -451,15 +523,16 @@ if __name__=='__main__':
 	# the optimizers are not shared. Need to implement version
 	# where it is shared
 	print("Creating optimizers...")
-	optimizer_next_object = torch.optim.RMSprop(DQN_next_object_main.parameters())
-	optimizer_predicate = torch.optim.RMSprop(DQN_predicate_main.parameters())
-	optimizer_attribute = torch.optim.RMSprop(DQN_attribute_main.parameters())
+	optimiser = torch.optim.RMSprop(DQN_main.parameters())
+	# optimizer_next_object = torch.optim.RMSprop(DQN_next_object_main.parameters())
+	# optimizer_predicate = torch.optim.RMSprop(DQN_predicate_main.parameters())
+	# optimizer_attribute = torch.optim.RMSprop(DQN_attribute_main.parameters())
 	print("Done!")
 
 	# define loss functions
-	loss_fn_attribute = nn.MSELoss()
-	loss_fn_predicate = nn.MSELoss()
-	loss_fn_next_object = nn.MSELoss()	
+	loss_fn = nn.MSELoss()
+	# loss_fn_predicate = nn.MSELoss()
+	# loss_fn_next_object = nn.MSELoss()	
 
 	# create replay buffer
 	print("Creating replay buffer...")
