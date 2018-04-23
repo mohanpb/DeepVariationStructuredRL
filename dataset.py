@@ -34,7 +34,11 @@ def collate(batch):
 	image_origs = []
 	sg_dicts = []
 	for b in batch:
-		images.append(b[0])
+		print b[0].size()
+		if b[0].size()[1]==1:
+			images.append(b[0].repeat(1,3,1,1))
+		else:
+			images.append(b[0])
 		image_origs.append(b[1])
 		sg_dicts.append(b[2])
 	return torch.stack(images, 0), image_origs, sg_dicts

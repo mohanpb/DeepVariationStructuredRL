@@ -3,6 +3,7 @@ from PIL import Image
 import torch
 from torchvision import transforms
 import numpy as np
+import matplotlib.pyplot as plt
 
 OBJECT_ALIAS_FILE = "../data/raw_data/object_alias.txt"
 PREDICATE_ALIAS_FILE = "../data/raw_data/relationship_alias.txt"
@@ -44,11 +45,14 @@ def crop_box(image_arr, box):
 	return transform(crop_box).unsqueeze(0)
 
 def object_features(image, image_feats, box):
-	size = image.size
-	box = [1.0*box[0]/size[0], 1.0*box[1]/size[1], 1.0*box[2]/size[0], 1.0*box[3]/size[1]]
-	box = [math.floor(7*x) for x in box]
-	object_features = image_feats[box[0]:box[2],box[1]:box[3]]
-	object_features = torch.mean(torch.mean(object_features,1),0)
+	size = image.shape[0:2]
+	box1 = [1.0*box[0]/size[1], 1.0*box[1]/size[0], 1.0*box[2]/size[1], 1.0*box[3]/size[0]]
+	box2 = [int(math.floor(7*box1[0])),int(math.floor(7*box1[1])),int(math.ceil(7*box1[2])),int(math.ceil(7*box1[3]))]
+	if box2[2]<=box2[0] or box2[3]<=box2[1] or box2[2]>7 or box2[3]>7:
+		print size,box,box1,box2
+		#plt.imshow(image)
+	object_features = image_feats[:,box2[1]:box2[3],box2[0]:box2[2]]
+	object_features = torch.mean(torch.mean(object_features,1),1)
 	return object_features
 
 # HELPER FUNCTIONS

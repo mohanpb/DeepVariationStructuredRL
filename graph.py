@@ -56,7 +56,7 @@ class Semantic_Action_Graph():
 		predicates_to_return = {}
 		if object_node != None:
 			for p_edge in subject_node.predicate_edges:
-				subject_node.attribute_edges[a_edge].multiplicity
+				#subject_node.attribute_edges[a_edge].multiplicity
 				if subject_node.predicate_edges[p_edge].object_id == object_node.ID:
 					predicates_to_return[subject_node.predicate_edges[p_edge].predicate_id] = subject_node.predicate_edges[p_edge].multiplicity
 	
@@ -67,7 +67,8 @@ class Semantic_Action_Graph():
 
 		if max_num_to_return == -1:
 			return (attributes_to_return, predicates_to_return)
-		return (attributes_to_return[:max_num_to_return], predicates_to_return[:max_num_to_return]) 
+		return (list(set(attributes_to_return[:max_num_to_return])), list(set(predicates_to_return[:max_num_to_return])))
+
 
 # NODES
 class Node():
